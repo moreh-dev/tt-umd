@@ -32,13 +32,12 @@ TEST(CoordinateManager, CoordinateManagerBlackholeNoHarvesting) {
 
 // Test basic translation to virtual and physical noc coordinates.
 // We expect that the top left core will have virtual and physical coordinates (1, 2) and (2, 2) for
-// the logical coordinates if the first row is harvested.
+// the logical coordinates (0, 0) if the first column is harvested.
 TEST(CoordinateManager, CoordinateManagerBlackholeTopLeftCore) {
-    // This is targeting first row of Tensix cores on NOC layout.
+    // This is targeting first column of Tensix cores on NOC layout.
     const size_t tensix_harvesting_mask = (1 << 0);
     std::shared_ptr<CoordinateManager> coordinate_manager =
         CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true, {tensix_harvesting_mask});
-    tt_xy_pair tensix_grid_size = tt::umd::blackhole::TENSIX_GRID_SIZE;
 
     CoreCoord logical_coords = CoreCoord(0, 0, CoreType::TENSIX, CoordSystem::LOGICAL);
 
@@ -49,6 +48,48 @@ TEST(CoordinateManager, CoordinateManagerBlackholeTopLeftCore) {
     // This depends on harvesting mask. So expected physical coord is specific to this test and Blackhole arch.
     CoreCoord physical_cords = coordinate_manager->translate_coord_to(logical_coords, CoordSystem::PHYSICAL);
     EXPECT_EQ(physical_cords, CoreCoord(2, 2, CoreType::TENSIX, CoordSystem::PHYSICAL));
+}
+
+// Test basic translation to virtual and physical noc coordinates.
+// We expect that the top right core will have virtual and physical coordinates (15, 2) and (16, 2) for
+// the logical coordinates (12, 0) if the first column is harvested.
+TEST(CoordinateManager, CoordinateManagerBlackholeTopRightCore) {
+    // This is targeting first column of Tensix cores on NOC layout.
+    const size_t tensix_harvesting_mask = (1 << 0);
+    std::shared_ptr<CoordinateManager> coordinate_manager =
+        CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true, {tensix_harvesting_mask});
+
+    tt_xy_pair tensix_grid_size = coordinate_manager->get_grid_size(CoreType::TENSIX);
+    EXPECT_EQ(tensix_grid_size.x, 13);
+    EXPECT_EQ(tensix_grid_size.y, 10);
+    CoreCoord logical_coords = CoreCoord(tensix_grid_size.x - 1, 0, CoreType::TENSIX, CoordSystem::LOGICAL);
+
+    CoreCoord virtual_cords = coordinate_manager->translate_coord_to(logical_coords, CoordSystem::VIRTUAL);
+    EXPECT_EQ(virtual_cords, CoreCoord(15, 2, CoreType::TENSIX, CoordSystem::VIRTUAL));
+
+    CoreCoord physical_cords = coordinate_manager->translate_coord_to(logical_coords, CoordSystem::PHYSICAL);
+    EXPECT_EQ(physical_cords, CoreCoord(16, 2, CoreType::TENSIX, CoordSystem::PHYSICAL));
+}
+
+// Test basic translation to virtual and physical noc coordinates.
+// We expect that the bottom left core will have virtual and physical coordinates (1, 11) and (2, 11) for
+// the logical coordinates (0, 9) if the first column is harvested.
+TEST(CoordinateManager, CoordinateManagerBlackholeBottomLeftCore) {
+    // This is targeting first column of Tensix cores on NOC layout.
+    const size_t tensix_harvesting_mask = (1 << 0);
+    std::shared_ptr<CoordinateManager> coordinate_manager =
+        CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true, {tensix_harvesting_mask});
+
+    tt_xy_pair tensix_grid_size = coordinate_manager->get_grid_size(CoreType::TENSIX);
+    EXPECT_EQ(tensix_grid_size.x, 13);
+    EXPECT_EQ(tensix_grid_size.y, 10);
+    CoreCoord logical_coords = CoreCoord(0, tensix_grid_size.y - 1, CoreType::TENSIX, CoordSystem::LOGICAL);
+
+    CoreCoord virtual_cords = coordinate_manager->translate_coord_to(logical_coords, CoordSystem::VIRTUAL);
+    EXPECT_EQ(virtual_cords, CoreCoord(1, 11, CoreType::TENSIX, CoordSystem::VIRTUAL));
+
+    CoreCoord physical_cords = coordinate_manager->translate_coord_to(logical_coords, CoordSystem::PHYSICAL);
+    EXPECT_EQ(physical_cords, CoreCoord(2, 11, CoreType::TENSIX, CoordSystem::PHYSICAL));
 }
 
 // Test logical to physical coordinate translation.
@@ -217,7 +258,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholeTransltedMappingHarvested) {
         CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true, {tensix_harvesting_mask});
 
     const tt_xy_pair tensix_grid_size = tt::umd::blackhole::TENSIX_GRID_SIZE;
-    const std::vector<tt_xy_pair> tensix_cores = tt::umd::blackhole::TENSIX_CORES;
+    const std::vector<tt_xy_pair> tensix_cores = tt::umd::blackhole::TENSIX_CORES_NOC0;
 
     size_t num_harvested_x = CoordinateManager::get_num_harvested(tensix_harvesting_mask);
 
@@ -263,7 +304,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholeDRAMNoHarvesting) {
 
     const size_t num_dram_banks = tt::umd::blackhole::NUM_DRAM_BANKS;
     const size_t num_noc_ports_per_bank = tt::umd::blackhole::NUM_NOC_PORTS_PER_DRAM_BANK;
-    const std::vector<tt_xy_pair>& dram_cores = tt::umd::blackhole::DRAM_CORES;
+    const std::vector<tt_xy_pair>& dram_cores = flatten_vector(tt::umd::blackhole::DRAM_CORES_NOC0);
 
     for (size_t dram_bank = 0; dram_bank < num_dram_banks; dram_bank++) {
         for (size_t noc_port = 0; noc_port < num_noc_ports_per_bank; noc_port++) {
@@ -304,7 +345,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholeDRAMLogicalPhysicalMapping) {
     const size_t max_num_banks_harvested = tt::umd::blackhole::NUM_DRAM_BANKS;
     const size_t num_dram_banks = tt::umd::blackhole::NUM_DRAM_BANKS;
     const size_t num_noc_ports_per_bank = tt::umd::blackhole::NUM_NOC_PORTS_PER_DRAM_BANK;
-    const std::vector<tt_xy_pair>& dram_cores = tt::umd::blackhole::DRAM_CORES;
+    const std::vector<tt_xy_pair>& dram_cores = flatten_vector(tt::umd::blackhole::DRAM_CORES_NOC0);
 
     for (size_t dram_harvesting_mask = 0; dram_harvesting_mask < (1 << max_num_banks_harvested);
          dram_harvesting_mask++) {
@@ -449,7 +490,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholeDRAMVirtualPhysicalMapping) {
     const size_t num_dram_banks = tt::umd::blackhole::NUM_DRAM_BANKS;
     const size_t num_noc_ports_per_bank = tt::umd::blackhole::NUM_NOC_PORTS_PER_DRAM_BANK;
 
-    const std::vector<tt_xy_pair> dram_cores = tt::umd::blackhole::DRAM_CORES;
+    const std::vector<tt_xy_pair> dram_cores = flatten_vector(tt::umd::blackhole::DRAM_CORES_NOC0);
 
     const size_t dram_harvesting_mask = 1;
 
@@ -510,7 +551,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholePCIETranslationLocal) {
     std::shared_ptr<CoordinateManager> coordinate_manager =
         CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true, {0, 0, 0}, BoardType::P300, false);
     const tt_xy_pair pcie_grid_size = tt::umd::blackhole::PCIE_GRID_SIZE;
-    const std::vector<tt_xy_pair> pcie_cores = tt::umd::blackhole::PCIE_CORES_TYPE2;
+    const std::vector<tt_xy_pair> pcie_cores = tt::umd::blackhole::PCIE_CORES_TYPE2_NOC0;
 
     for (size_t x = 0; x < pcie_grid_size.x; x++) {
         for (size_t y = 0; y < pcie_grid_size.y; y++) {
@@ -533,7 +574,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholePCIETranslationRemote) {
     std::shared_ptr<CoordinateManager> coordinate_manager =
         CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true);
     const tt_xy_pair pcie_grid_size = tt::umd::blackhole::PCIE_GRID_SIZE;
-    const std::vector<tt_xy_pair> pcie_cores = tt::umd::blackhole::PCIE_CORES_TYPE1;
+    const std::vector<tt_xy_pair> pcie_cores = tt::umd::blackhole::PCIE_CORES_TYPE1_NOC0;
 
     for (size_t x = 0; x < pcie_grid_size.x; x++) {
         for (size_t y = 0; y < pcie_grid_size.y; y++) {
@@ -600,7 +641,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholeETHTranslation) {
 // Test ETH harvesting and coordinate translation for Blackhole.
 TEST(CoordinateManager, CoordinateManagerBlackholeETHHarvesting) {
     const size_t num_harvested_cores = 2;
-    const std::vector<tt_xy_pair> eth_cores = tt::umd::blackhole::ETH_CORES;
+    const std::vector<tt_xy_pair> eth_cores = tt::umd::blackhole::ETH_CORES_NOC0;
     const size_t num_eth_channels = tt::umd::blackhole::NUM_ETH_CHANNELS;
     for (size_t eth_harvesting_mask = 0; eth_harvesting_mask < (1 << num_eth_channels); eth_harvesting_mask++) {
         // We should have exactly 2 harvested ETH cores.
@@ -692,7 +733,7 @@ TEST(CoordinateManager, CoordinateManagerBlackholeETHNoNocTranslationMapping) {
     std::shared_ptr<CoordinateManager> coordinate_manager =
         CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, false);
 
-    const std::vector<tt_xy_pair> eth_pairs = tt::umd::blackhole::ETH_CORES;
+    const std::vector<tt_xy_pair> eth_pairs = tt::umd::blackhole::ETH_CORES_NOC0;
     for (const tt_xy_pair& eth_pair : eth_pairs) {
         const CoreCoord eth_core = CoreCoord(eth_pair.x, eth_pair.y, CoreType::ETH, CoordSystem::PHYSICAL);
         const CoreCoord eth_translated = coordinate_manager->translate_coord_to(eth_core, CoordSystem::TRANSLATED);
@@ -700,4 +741,40 @@ TEST(CoordinateManager, CoordinateManagerBlackholeETHNoNocTranslationMapping) {
         EXPECT_EQ(eth_translated.x, eth_pair.x);
         EXPECT_EQ(eth_translated.y, eth_pair.y);
     }
+}
+
+TEST(CoordinateManager, CoordinateManagerBlackholeNoc1Noc0Mapping) {
+    std::shared_ptr<CoordinateManager> coordinate_manager =
+        CoordinateManager::create_coordinate_manager(tt::ARCH::BLACKHOLE, true);
+
+    auto check_noc0_noc1_mapping = [coordinate_manager](
+                                       const std::vector<tt_xy_pair> noc0_cores,
+                                       const std::vector<tt_xy_pair> noc1_cores,
+                                       const CoreType core_type) {
+        for (uint32_t index = 0; index < noc0_cores.size(); index++) {
+            const CoreCoord noc0_core =
+                CoreCoord(noc0_cores[index].x, noc0_cores[index].y, core_type, CoordSystem::PHYSICAL);
+            const CoreCoord noc1_core = coordinate_manager->translate_coord_to(noc0_core, CoordSystem::NOC1);
+
+            EXPECT_EQ(noc1_core.x, noc1_cores[index].x);
+            EXPECT_EQ(noc1_core.y, noc1_cores[index].y);
+
+            const CoreCoord noc0_core_from_noc1 =
+                coordinate_manager->translate_coord_to(noc1_core, CoordSystem::PHYSICAL);
+
+            EXPECT_EQ(noc0_core_from_noc1.x, noc0_cores[index].x);
+            EXPECT_EQ(noc0_core_from_noc1.y, noc0_cores[index].y);
+        }
+    };
+
+    check_noc0_noc1_mapping(
+        tt::umd::blackhole::TENSIX_CORES_NOC0, tt::umd::blackhole::TENSIX_CORES_NOC1, CoreType::TENSIX);
+    check_noc0_noc1_mapping(
+        flatten_vector(tt::umd::blackhole::DRAM_CORES_NOC0),
+        flatten_vector(tt::umd::blackhole::DRAM_CORES_NOC1),
+        CoreType::DRAM);
+    check_noc0_noc1_mapping(tt::umd::blackhole::ETH_CORES_NOC0, tt::umd::blackhole::ETH_CORES_NOC1, CoreType::ETH);
+    check_noc0_noc1_mapping(tt::umd::blackhole::ARC_CORES_NOC0, tt::umd::blackhole::ARC_CORES_NOC1, CoreType::ARC);
+    check_noc0_noc1_mapping(
+        {tt::umd::blackhole::PCIE_CORES_NOC0[1]}, {tt::umd::blackhole::PCIE_CORES_NOC1[1]}, CoreType::PCIE);
 }

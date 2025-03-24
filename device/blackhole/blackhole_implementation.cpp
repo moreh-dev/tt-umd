@@ -52,15 +52,6 @@ tlb_configuration blackhole_implementation::get_tlb_configuration(uint32_t tlb_i
     };
 }
 
-std::pair<std::uint64_t, std::uint64_t> blackhole_implementation::get_tlb_data(
-    std::uint32_t tlb_index, const tlb_data& data) const {
-    if (tlb_index < blackhole::TLB_COUNT_2M) {
-        return data.apply_offset(blackhole::TLB_2M_OFFSET);
-    } else {
-        throw std::runtime_error("Invalid TLB index for Blackhole arch");
-    }
-}
-
 tt_device_l1_address_params blackhole_implementation::get_l1_address_params() const {
     // L1 barrier base and erisc barrier base should be explicitly set by the client.
     // Setting some default values here, but it should be ultimately overridden by the client.
@@ -109,10 +100,10 @@ namespace blackhole {
 std::vector<tt_xy_pair> get_pcie_cores(const BoardType board_type, const uint8_t asic_location) {
     // Default to type 1 chip.
     if (board_type == BoardType::UNKNOWN) {
-        return PCIE_CORES_TYPE1;
+        return PCIE_CORES_TYPE1_NOC0;
     }
     auto chip_type = get_blackhole_chip_type(board_type, asic_location);
-    return chip_type == BlackholeChipType::Type1 ? PCIE_CORES_TYPE1 : PCIE_CORES_TYPE2;
+    return chip_type == BlackholeChipType::Type1 ? PCIE_CORES_TYPE1_NOC0 : PCIE_CORES_TYPE2_NOC0;
 }
 }  // namespace blackhole
 

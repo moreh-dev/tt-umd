@@ -40,6 +40,7 @@
 #include "api/umd/device/tt_core_coordinates.h"
 #include "logger.hpp"
 #include "umd/device/architecture_implementation.h"
+#include "umd/device/blackhole_implementation.h"
 #include "umd/device/chip/local_chip.h"
 #include "umd/device/chip/mock_chip.h"
 #include "umd/device/chip/remote_chip.h"
@@ -230,12 +231,11 @@ void Cluster::create_device(
             log_debug(
                 LogSiliconDriver,
                 "Using {} Hugepages/NumHostMemChannels for PCIDevice (logical_device_id: {} pci_interface_id: {} "
-                "device_id: 0x{:x} revision: {})",
+                "device_id: 0x{:x})",
                 num_host_mem_channels,
                 logical_device_id,
                 pci_device->get_device_num(),
-                pci_device->get_device_num(),
-                pci_device->revision_id);
+                pci_device->get_device_num());
 
             // TODO: This will be moved to a dedicated Locking class.
             initialize_interprocess_mutexes(logical_device_id, clean_system_resources);
@@ -342,9 +342,18 @@ std::unique_ptr<Chip> Cluster::construct_chip_from_cluster(
     std::unordered_map<chip_id_t, HarvestingMasks>& simulated_harvesting_masks,
     const bool create_mock_chip) {
     tt::ARCH arch = cluster_desc->get_arch(chip_id);
-    std::string soc_desc_path = tt_SocDescriptor::get_soc_descriptor_path(arch);
-    return construct_chip_from_cluster(
-        soc_desc_path, chip_id, cluster_desc, perform_harvesting, simulated_harvesting_masks, create_mock_chip);
+    HarvestingMasks harvesting_masks =
+        get_harvesting_masks(chip_id, cluster_desc, perform_harvesting, simulated_harvesting_masks);
+    const BoardType chip_board_type = cluster_desc->get_board_type(chip_id);
+    std::optional<ChipUID> chip_uid = cluster_desc->get_chip_uid(chip_id);
+    uint8_t asic_location = chip_uid.has_value() ? chip_uid.value().asic_location : 0;
+    tt_SocDescriptor soc_desc = tt_SocDescriptor(
+        arch,
+        cluster_desc->get_noc_translation_table_en().at(chip_id),
+        harvesting_masks,
+        chip_board_type,
+        asic_location);
+    return construct_chip_from_cluster(chip_id, cluster_desc, soc_desc, create_mock_chip);
 }
 
 void Cluster::add_chip(chip_id_t chip_id, std::unique_ptr<Chip> chip) {
@@ -881,13 +890,12 @@ void Cluster::write_device_memory(
 
     log_debug(
         LogSiliconDriver,
-        "Cluster::write_device_memory to chip:{} {}-{} at 0x{:x} size_in_bytes: {} small_access: {}",
+        "Cluster::write_device_memory to chip:{} {}-{} at 0x{:x} size_in_bytes: {}",
         target.chip,
         target.x,
         target.y,
         address,
-        size_in_bytes,
-        small_access);
+        size_in_bytes);
 
     if (get_tlb_manager(target.chip)->is_tlb_mapped({target.x, target.y}, address, size_in_bytes)) {
         tlb_configuration tlb_description = get_tlb_manager(target.chip)->get_tlb_configuration({target.x, target.y});
@@ -934,8 +942,6 @@ void Cluster::read_device_memory(
         size_in_bytes);
     TTDevice* dev = get_tt_device(target.chip);
     uint8_t* buffer_addr = static_cast<uint8_t*>(mem_ptr);
-
-    log_debug(LogSiliconDriver, "  tlb_index: {}, tlb_data.has_value(): {}", tlb_index, tlb_data.has_value());
 
     if (get_tlb_manager(target.chip)->is_tlb_mapped({target.x, target.y}, address, size_in_bytes)) {
         tlb_configuration tlb_description = get_tlb_manager(target.chip)->get_tlb_configuration({target.x, target.y});
@@ -1265,6 +1271,10 @@ int Cluster::pcie_arc_msg(
     int timeout,
     uint32_t* return_3,
     uint32_t* return_4) {
+    // Exclusive access for a single process at a time.
+    std::string msg_type = "ARC_MSG";
+    const scoped_lock<named_mutex> lock(*get_mutex(msg_type, logical_device_id));
+
     std::vector<uint32_t> arc_msg_return_values;
 
     if (return_3 != nullptr) {
@@ -2845,7 +2855,6 @@ int Cluster::arc_msg(
     int timeout,
     uint32_t* return_3,
     uint32_t* return_4) {
-    log_assert(arch_name != tt::ARCH::BLACKHOLE, "ARC messages not supported in Blackhole");
     if (cluster_desc->is_chip_mmio_capable(logical_device_id)) {
         return pcie_arc_msg(logical_device_id, msg_code, wait_for_done, arg0, arg1, timeout, return_3, return_4);
     } else {
@@ -3156,14 +3165,15 @@ std::unique_ptr<tt_ClusterDescriptor> Cluster::create_cluster_descriptor(std::st
     if (pci_device_info.begin()->second.get_arch() == tt::ARCH::BLACKHOLE) {
         std::vector<int> pci_device_ids = PCIDevice::enumerate_devices();
 
-        if (sdesc_path.empty()) {
-            sdesc_path = tt_SocDescriptor::get_soc_descriptor_path(tt::ARCH::BLACKHOLE);
-        }
-
         std::unordered_map<chip_id_t, std::unique_ptr<Chip>> chips;
         chip_id_t chip_id = 0;
         for (auto& device_id : pci_device_ids) {
-            std::unique_ptr<LocalChip> chip = std::make_unique<LocalChip>(sdesc_path, TTDevice::create(device_id));
+            std::unique_ptr<LocalChip> chip = nullptr;
+            if (sdesc_path.empty()) {
+                chip = std::make_unique<LocalChip>(TTDevice::create(device_id));
+            } else {
+                chip = std::make_unique<LocalChip>(sdesc_path, TTDevice::create(device_id));
+            }
             chips.emplace(chip_id, std::move(chip));
             chip_id++;
         }
@@ -3171,10 +3181,6 @@ std::unique_ptr<tt_ClusterDescriptor> Cluster::create_cluster_descriptor(std::st
         return Cluster::create_cluster_descriptor(chips);
     } else {
         std::vector<int> pci_device_ids = PCIDevice::enumerate_devices();
-
-        if (sdesc_path.empty()) {
-            sdesc_path = tt_SocDescriptor::get_soc_descriptor_path(tt::ARCH::WORMHOLE_B0);
-        }
 
         std::vector<std::unique_ptr<TTDevice>> tt_devices;
         for (auto& device_id : pci_device_ids) {
@@ -3191,7 +3197,12 @@ std::unique_ptr<tt_ClusterDescriptor> Cluster::create_cluster_descriptor(std::st
         std::unordered_map<chip_id_t, std::unique_ptr<Chip>> chips;
         chip_id_t chip_id = 0;
         for (auto& device_id : pci_device_ids) {
-            std::unique_ptr<LocalChip> chip = std::make_unique<LocalChip>(sdesc_path, TTDevice::create(device_id));
+            std::unique_ptr<LocalChip> chip = nullptr;
+            if (sdesc_path.empty()) {
+                chip = std::make_unique<LocalChip>(TTDevice::create(device_id));
+            } else {
+                chip = std::make_unique<LocalChip>(sdesc_path, TTDevice::create(device_id));
+            }
             chips.emplace(chip_id, std::move(chip));
             chip_id++;
         }
@@ -3211,7 +3222,31 @@ std::unique_ptr<tt_ClusterDescriptor> Cluster::create_cluster_descriptor(
     for (auto& it : chips) {
         const chip_id_t chip_id = it.first;
         const std::unique_ptr<Chip>& chip = it.second;
-        desc->add_chip_uid(chip_id, chip->get_chip_info().chip_uid);
+
+        // TODO: Use the line below when we can read asic location from the Blackhole telemetry.
+        // Until then we have to read it from ETH core.
+        // desc->add_chip_uid(chip_id, chip->get_chip_info().chip_uid);
+
+        // TODO: Remove this when we can read asic location from the Blackhole telemetry.
+        // Until then we have to read it from ETH core.
+        const std::vector<CoreCoord> eth_cores = chip->get_soc_descriptor().get_cores(CoreType::ETH);
+        for (size_t eth_channel = 0; eth_channel < eth_cores.size(); eth_channel++) {
+            const CoreCoord& eth_core = eth_cores[eth_channel];
+            TTDevice* tt_device = chip->get_tt_device();
+            blackhole::boot_results_t boot_results;
+
+            tt_device->read_from_device(
+                (uint8_t*)&boot_results,
+                tt_xy_pair(eth_core.x, eth_core.y),
+                blackhole::BOOT_RESULTS_ADDR,
+                sizeof(boot_results));
+
+            // We can read the asic location only from active ETH cores.
+            if (boot_results.eth_status.port_status == blackhole::port_status_e::PORT_UP) {
+                const blackhole::chip_info_t& local_info = boot_results.local_info;
+                desc->add_chip_uid(chip_id, ChipUID{chip->get_chip_info().chip_uid.board_id, local_info.asic_location});
+            }
+        }
     }
 
     for (auto& it : chips) {
@@ -3269,9 +3304,15 @@ std::unique_ptr<tt_ClusterDescriptor> Cluster::create_cluster_descriptor(
                             chip_id,
                             remote_info.get_chip_uid().board_id);
                     } else {
+                        const CoreCoord logical_remote_coord = chips.at(remote_chip_id.value())
+                                                                   ->get_soc_descriptor()
+                                                                   .translate_coord_to(
+                                                                       blackhole::ETH_CORES_NOC0[remote_info.eth_id],
+                                                                       CoordSystem::PHYSICAL,
+                                                                       CoordSystem::LOGICAL);
                         // Adding a connection only one way, the other chip should add it another way.
-                        desc->ethernet_connections[local_chip_id][local_info.eth_id] = {
-                            remote_chip_id.value(), remote_info.eth_id};
+                        desc->ethernet_connections[local_chip_id][eth_channel] = {
+                            remote_chip_id.value(), logical_remote_coord.y};
                     }
                 } else if (boot_results.eth_status.port_status == blackhole::port_status_e::PORT_DOWN) {
                     // active eth core, just with link being down.

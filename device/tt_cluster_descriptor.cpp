@@ -171,10 +171,10 @@ int tt_ClusterDescriptor::get_ethernet_link_coord_distance(
             galaxy_shelves_exit_chip_coords_per_y_dim.at(location_b.shelf).at(location_b.y);
         log_assert(
             shelf_to_shelf_connection.destination_chip_coords.size(),
-            "Expecting at least one shelf-to-shelf connection, possibly one-to-many")
+            "Expecting at least one shelf-to-shelf connection, possibly one-to-many");
 
-            // for each shelf-to-shelf connection at location_b.y, find the distance to location_a, take min
-            int distance = std::numeric_limits<int>::max();
+        // for each shelf-to-shelf connection at location_b.y, find the distance to location_a, take min
+        int distance = std::numeric_limits<int>::max();
         eth_coord_t exit_shelf = shelf_to_shelf_connection.source_chip_coord;
         for (eth_coord_t next_shelf : shelf_to_shelf_connection.destination_chip_coords) {
             log_assert(
@@ -449,9 +449,6 @@ std::unique_ptr<tt_ClusterDescriptor> tt_ClusterDescriptor::create_mock_cluster(
 
     BoardType board_type;
     switch (arch) {
-        case tt::ARCH::GRAYSKULL:
-            board_type = BoardType::E150;
-            break;
         case tt::ARCH::WORMHOLE_B0:
             board_type = BoardType::N150;
             break;
@@ -502,7 +499,11 @@ void tt_ClusterDescriptor::load_ethernet_connections_from_connectivity_descripto
         log_assert(connected_endpoints.IsSequence(), "Invalid YAML");
 
         std::vector<YAML::Node> endpoints = connected_endpoints.as<std::vector<YAML::Node>>();
-        log_assert(endpoints.size() == 2, "Currently ethernet cores can only connect to one other ethernet endpoint");
+        log_assert(
+            endpoints.size() <= 3,
+            "Ethernet connections in YAML should always contatin information on connected endpoints and optionally "
+            "information on whether "
+            "routing is enabled.");
 
         int chip_0 = endpoints.at(0)["chip"].as<int>();
         int channel_0 = endpoints.at(0)["chan"].as<int>();
@@ -530,6 +531,8 @@ void tt_ClusterDescriptor::load_ethernet_connections_from_connectivity_descripto
         desc.idle_eth_channels[chip_1].erase(channel_1);
     }
 
+    // std::unordered_map<ethernet_channel_t, std::tuple<chip_id_t, ethernet_channel_t>>> ethernet_connections;
+
     log_debug(LogSiliconDriver, "Ethernet Connectivity Descriptor:");
     for (const auto &[chip, chan_to_chip_chan_map] : desc.ethernet_connections) {
         for (const auto &[chan, chip_and_chan] : chan_to_chip_chan_map) {
@@ -538,8 +541,8 @@ void tt_ClusterDescriptor::load_ethernet_connections_from_connectivity_descripto
                 "\tchip: {}, chan: {}  <-->  chip: {}, chan: {}",
                 chip,
                 chan,
-                chip_and_chan.x,
-                chip_and_chan.y);
+                std::get<0>(chip_and_chan),
+                std::get<1>(chip_and_chan));
         }
     }
 
@@ -760,13 +763,7 @@ void tt_ClusterDescriptor::load_chips_from_connectivity_descriptor(YAML::Node &y
         for (const auto &chip_board_type : yaml["boardtype"].as<std::map<int, std::string>>()) {
             auto &chip = chip_board_type.first;
             BoardType board_type;
-            if (chip_board_type.second == "e75") {
-                board_type = BoardType::E75;
-            } else if (chip_board_type.second == "e150") {
-                board_type = BoardType::E150;
-            } else if (chip_board_type.second == "e300") {
-                board_type = BoardType::E300;
-            } else if (chip_board_type.second == "n150") {
+            if (chip_board_type.second == "n150") {
                 board_type = BoardType::N150;
             } else if (chip_board_type.second == "n300") {
                 board_type = BoardType::N300;
