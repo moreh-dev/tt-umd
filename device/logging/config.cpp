@@ -35,7 +35,9 @@ constexpr auto log_pattern = "[%Y-%m-%d %H:%M:%S.%e] [%l] [%s:%#] %v";
  * setting up either file-based or console-based logging depending on
  * the environment variable configuration.
  */
-static tt::LoggerInitializer loggerInitializer(file_env_var, level_env_var, log_pattern);
+
+// Temporary comment out this line for using tt-metal with Moreh AI framework.
+//static tt::LoggerInitializer loggerInitializer(file_env_var, level_env_var);
 
 /// Map our internal enum to spdlog's level enum.
 spdlog::level::level_enum to_spdlog_level(level lvl) {
